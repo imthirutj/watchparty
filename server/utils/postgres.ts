@@ -24,6 +24,8 @@ export function newPostgres() {
   const postgres = new Client({
     connectionString: config.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 8000,
+    query_timeout: 8000,
   });
   postgres.connect().catch((e) => {
     console.error("postgres connection error:", e.message);
