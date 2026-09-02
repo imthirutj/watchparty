@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: watchparty
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
