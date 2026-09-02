@@ -1,4 +1,5 @@
 import config from "../config.ts";
+import axios from "axios";
 import {
   PT_HOURS_REGEX,
   PT_MINUTES_REGEX,
@@ -13,6 +14,63 @@ let Youtube = config.YOUTUBE_API_KEY
       auth: config.YOUTUBE_API_KEY,
     })
   : null;
+
+// Free fallbacks, no API key required, used when YOUTUBE_API_KEY isn't
+// configured. Search scrapes YouTube's own results page (the ytInitialData
+// blob it renders server-side); single-video lookup uses YouTube's public
+// oEmbed endpoint.
+
+const searchYoutubeScraper = async (
+  query: string,
+): Promise<PlaylistVideo[]> => {
+  const resp = await axios.get<string>(
+    `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+    { headers: { "User-Agent": "watchparty v1" } },
+  );
+  const match = resp.data.match(/var ytInitialData = ({.+?});/s);
+  if (!match) {
+    return [];
+  }
+  const data = JSON.parse(match[1]);
+  const items =
+    data?.contents?.twoColumnSearchResultsRenderer?.primaryContents
+      ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents ??
+    [];
+  return items
+    .filter((i: any) => i.videoRenderer)
+    .slice(0, 25)
+    .map((i: any) => {
+      const v = i.videoRenderer;
+      return {
+        channel: v.ownerText?.runs?.[0]?.text ?? "",
+        url: "https://www.youtube.com/watch?v=" + v.videoId,
+        name: v.title?.runs?.[0]?.text ?? "",
+        img: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+        duration: 0,
+        type: "youtube",
+      };
+    });
+};
+
+const fetchYoutubeVideoOembed = async (
+  id: string,
+): Promise<PlaylistVideo | null> => {
+  try {
+    const resp = await axios.get(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent("https://www.youtube.com/watch?v=" + id)}&format=json`,
+    );
+    return {
+      url: "https://www.youtube.com/watch?v=" + id,
+      name: resp.data.title ?? "",
+      img: resp.data.thumbnail_url ?? "",
+      channel: resp.data.author_name ?? "",
+      duration: 0,
+      type: "youtube",
+    };
+  } catch {
+    return null;
+  }
+};
 
 export const mapYoutubeSearchResult = (
   video: youtube_v3.Schema$SearchResult,
@@ -58,7 +116,10 @@ export const mapYoutubePlaylistResult = (
 export const searchYoutube = async (
   query: string,
 ): Promise<PlaylistVideo[]> => {
-  const response = await Youtube?.search.list({
+  if (!Youtube) {
+    return searchYoutubeScraper(query);
+  }
+  const response = await Youtube.search.list({
     part: ["snippet"],
     type: ["video"],
     maxResults: 25,
@@ -95,7 +156,10 @@ export const getYoutubeVideoID = (url: string) => {
 export const fetchYoutubeVideo = async (
   id: string,
 ): Promise<PlaylistVideo | null> => {
-  const response = await Youtube?.videos.list({
+  if (!Youtube) {
+    return fetchYoutubeVideoOembed(id);
+  }
+  const response = await Youtube.videos.list({
     part: ["snippet", "contentDetails"],
     id: [id],
   });
