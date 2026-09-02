@@ -4,7 +4,7 @@ COPY . /usr/src
 
 WORKDIR /usr/src
 
-RUN npm ci
+RUN npm install
 
 RUN npm run build
 
