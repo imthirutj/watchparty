@@ -7,7 +7,9 @@ if (config.DATABASE_URL) {
     connectionString: config.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
   });
-  postgres.connect();
+  postgres.connect().catch((e) => {
+    console.error("postgres connection error:", e.message);
+  });
 }
 
 /**
@@ -23,7 +25,9 @@ export function newPostgres() {
     connectionString: config.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
   });
-  postgres.connect();
+  postgres.connect().catch((e) => {
+    console.error("postgres connection error:", e.message);
+  });
   return postgres;
 }
 
