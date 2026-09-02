@@ -145,35 +145,42 @@ app.post("/subtitle", async (req, res) => {
 });
 
 // Free subtitle source, no API key required.
-// Search: title -> IMDb id (IMDb's public suggestion/autocomplete endpoint) -> subtitle list.
+// Scrapes opensubtitles.org's legacy XML search directly (same technique as
+// https://github.com/.../opensubtitle-scrapper, whose own hosted /api/search
+// and /api/view routes 500; only its keyless /api/subtitles route works, and
+// that one only carries language+encoding, no release names).
+function xmlField(block: string, tag: string): string {
+  const match = block.match(
+    new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`),
+  );
+  return match?.[1]?.trim() ?? "";
+}
+
 async function searchScraperSubtitles(title: string) {
-  const bucket = title[0]?.toLowerCase() || "a";
-  const suggestResp = await axios.get(
-    `https://v3.sg.media-imdb.com/suggestion/${bucket}/${encodeURIComponent(title)}.json`,
-  );
-  const imdbId = suggestResp.data?.d?.find((r: any) =>
-    r.id?.startsWith("tt"),
-  )?.id;
-  if (!imdbId) {
-    return [];
-  }
-  const subResp = await axios.get(
-    `https://opensubtitle-scrapper.vercel.app/api/subtitles?imdb=${imdbId}`,
-  );
-  const subtitles = subResp.data?.subtitles ?? [];
-  return subtitles.map((sub: any) => ({
-    id: "sc_" + sub.id,
-    type: "subtitle",
-    attributes: {
-      release: `[${(sub.lang || "").toUpperCase()}] ${sub.encoding || ""}`.trim(),
-      language: sub.lang,
-      files: [
-        {
-          file_id: "sc_" + Buffer.from(String(sub.url)).toString("base64url"),
+  const url = `https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-${encodeURIComponent(title)}/xml`;
+  const resp = await axios.get<string>(url, {
+    headers: { "User-Agent": "watchparty v1" },
+  });
+  const blocks = resp.data.match(/<subtitle>[\s\S]*?<\/subtitle>/g) ?? [];
+  return blocks
+    .map((block) => {
+      const fileId = xmlField(block, "IDSubtitleFile");
+      if (!fileId) {
+        return null;
+      }
+      return {
+        id: "sc_" + fileId,
+        type: "subtitle",
+        attributes: {
+          release:
+            xmlField(block, "MovieReleaseName") ||
+            xmlField(block, "MovieName"),
+          language: xmlField(block, "LanguageName"),
+          files: [{ file_id: "sc_" + fileId }],
         },
-      ],
-    },
-  }));
+      };
+    })
+    .filter((sub): sub is NonNullable<typeof sub> => sub !== null);
 }
 
 app.get("/downloadSubtitles", async (req, res) => {
@@ -181,9 +188,7 @@ app.get("/downloadSubtitles", async (req, res) => {
   try {
     if (fileId.startsWith("sc_")) {
       // Free scraper source, no OpenSubtitles key needed
-      const directUrl = Buffer.from(fileId.slice(3), "base64url").toString(
-        "utf8",
-      );
+      const directUrl = `https://subs5.strem.io/en/download/subencoding-stremio-utf8/src-api/file/${fileId.slice(3)}`;
       const subResp = await axios.get(directUrl, {
         responseType: "arraybuffer",
       });
