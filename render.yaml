@@ -3,7 +3,7 @@ services:
     name: watchparty
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     envVars:
       - key: NODE_ENV
         value: production
