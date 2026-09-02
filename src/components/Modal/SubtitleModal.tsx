@@ -210,7 +210,12 @@ export class SubtitleModal extends React.Component<{
                     >
                       <IconDownload />
                     </ActionIcon>
-                    <span>{result.attributes.release}</span>
+                    <span>
+                      {result.attributes.language && (
+                        <b>[{result.attributes.language}] </b>
+                      )}
+                      {result.attributes.release}
+                    </span>
                   </div>
                 ),
               )}
