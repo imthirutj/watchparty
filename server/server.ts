@@ -112,6 +112,10 @@ app.get("/ping", (_req, res) => {
   res.json("pong");
 });
 
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
 // Data's already compressed so go before the compression middleware
 app.get("/subtitle/:hash", async (req, res) => {
   const key = "subtitle:" + req.params.hash;
