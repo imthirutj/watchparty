@@ -116,6 +116,47 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// Hyperbeam managed cloud browser (alternative to self-hosted VBrowser,
+// no Docker/SSH/VM infra needed -- Hyperbeam hosts the browser itself)
+app.post("/hyperbeamSession", async (_req, res) => {
+  if (!config.HYPERBEAM_API_KEY) {
+    res.status(503).json({ error: "Hyperbeam not configured" });
+    return;
+  }
+  try {
+    const resp = await axios.post(
+      "https://engine.hyperbeam.com/v0/vm",
+      { offline_timeout: 300 },
+      { headers: { Authorization: `Bearer ${config.HYPERBEAM_API_KEY}` } },
+    );
+    res.json({
+      sessionId: resp.data.session_id,
+      embedUrl: resp.data.embed_url,
+    });
+  } catch (e) {
+    if (isAxiosError(e)) {
+      console.log(e.response?.status, e.response?.data);
+    }
+    res.status(502).json({ error: "Failed to create Hyperbeam session" });
+  }
+});
+
+app.delete("/hyperbeamSession/:sessionId", async (req, res) => {
+  if (!config.HYPERBEAM_API_KEY) {
+    res.status(503).json({ error: "Hyperbeam not configured" });
+    return;
+  }
+  try {
+    await axios.delete(
+      `https://engine.hyperbeam.com/v0/vm/${req.params.sessionId}`,
+      { headers: { Authorization: `Bearer ${config.HYPERBEAM_API_KEY}` } },
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false });
+  }
+});
+
 // Data's already compressed so go before the compression middleware
 app.get("/subtitle/:hash", async (req, res) => {
   const key = "subtitle:" + req.params.hash;

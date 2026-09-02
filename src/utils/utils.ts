@@ -125,6 +125,10 @@ export const isVBrowser = (input: string) => {
   return input.startsWith("vbrowser://");
 };
 
+export const isHyperbeam = (input: string) => {
+  return /^https:\/\/[^/]+\.hyperbeam\.com\//.test(input);
+};
+
 export async function testAutoplay() {
   const result = await canAutoplay.video();
   return result.result;

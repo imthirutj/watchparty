@@ -20,6 +20,7 @@ import {
   isScreenShare,
   isFileShare,
   isVBrowser,
+  isHyperbeam,
   isDash,
   VIDEO_MAX_HEIGHT_CSS,
   createUuid,
@@ -140,6 +141,7 @@ interface AppState {
   vBrowserResolution: string;
   vBrowserQuality: string;
   isVBrowserLarge: boolean;
+  hyperbeamSessionId: string | undefined;
   nonPlayableMedia: boolean;
   currentTab: string;
   isSubscribeModalOpen: boolean;
@@ -209,6 +211,7 @@ export class App extends React.Component<AppProps, AppState> {
     vBrowserResolution: "1280x720@30",
     vBrowserQuality: "1",
     isVBrowserLarge: false,
+    hyperbeamSessionId: undefined,
     nonPlayableMedia: false,
     currentTab:
       new URLSearchParams(window.location.search).get("tab") ?? "chat",
@@ -304,6 +307,12 @@ export class App extends React.Component<AppProps, AppState> {
     document.removeEventListener("fullscreenchange", this.onFullScreenChange);
     document.removeEventListener("keydown", this.onKeydown);
     window.clearInterval(this.heartbeat);
+    if (this.state.hyperbeamSessionId) {
+      fetch(
+        serverPath + "/hyperbeamSession/" + this.state.hyperbeamSessionId,
+        { method: "DELETE" },
+      ).catch(() => {});
+    }
   }
 
   init = async () => {
@@ -434,6 +443,19 @@ export class App extends React.Component<AppProps, AppState> {
       if (this.playingVBrowser() && !isVBrowser(currentMedia)) {
         this.stopVBrowser();
       }
+      if (
+        this.usingHyperbeam() &&
+        !isHyperbeam(currentMedia) &&
+        this.state.hyperbeamSessionId
+      ) {
+        // Someone else navigated away; release our session so it doesn't
+        // keep counting against Hyperbeam usage
+        fetch(
+          serverPath + "/hyperbeamSession/" + this.state.hyperbeamSessionId,
+          { method: "DELETE" },
+        ).catch(() => {});
+        this.setState({ hyperbeamSessionId: undefined });
+      }
       if (this.playingScreenShare() && isScreenShare(currentMedia)) {
         // Ignore, it's probably a reconnection
         return;
@@ -497,6 +519,10 @@ export class App extends React.Component<AppProps, AppState> {
               // Remove the loader unless we're waiting for a vbrowser
               this.setLoadingFalse();
             }
+            return;
+          }
+          if (this.usingHyperbeam()) {
+            this.setLoadingFalse();
             return;
           }
           if (this.usingYoutube() && !this.YouTubeInterface.isReady()) {
@@ -1655,14 +1681,21 @@ export class App extends React.Component<AppProps, AppState> {
     return isYouTube(this.state.roomMedia);
   };
 
+  usingHyperbeam = () => {
+    return isHyperbeam(this.state.roomMedia);
+  };
+
   usingNative = () => {
     // Anything that uses HTML Video (e.g. not YouTube, Vimeo, or other embedded JS player)
-    return !this.usingYoutube();
+    return !this.usingYoutube() && !this.usingHyperbeam();
   };
 
   hasDuration = () => {
     // Youtube, link, or magnet, etc. Has a defined runtime (not WebRTC)
-    return isHttp(this.state.roomMedia) || isMagnet(this.state.roomMedia);
+    return (
+      (isHttp(this.state.roomMedia) || isMagnet(this.state.roomMedia)) &&
+      !this.usingHyperbeam()
+    );
   };
 
   playingScreenShare = () => {
@@ -1686,7 +1719,33 @@ export class App extends React.Component<AppProps, AppState> {
   };
 
   isPauseDisabled = () => {
-    return this.playingScreenShare() || this.playingVBrowser();
+    return (
+      this.playingScreenShare() ||
+      this.playingVBrowser() ||
+      this.usingHyperbeam()
+    );
+  };
+
+  startHyperbeam = async () => {
+    const resp = await fetch(serverPath + "/hyperbeamSession", {
+      method: "POST",
+    });
+    const data = await resp.json();
+    if (data.embedUrl) {
+      this.setState({ hyperbeamSessionId: data.sessionId });
+      this.roomSetMedia(data.embedUrl);
+    }
+  };
+
+  stopHyperbeam = async () => {
+    const sessionId = this.state.hyperbeamSessionId;
+    if (sessionId) {
+      fetch(serverPath + "/hyperbeamSession/" + sessionId, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
+    this.setState({ hyperbeamSessionId: undefined });
+    this.roomSetMedia("");
   };
 
   localSeek = (customTime?: number) => {
@@ -1832,6 +1891,8 @@ export class App extends React.Component<AppProps, AppState> {
         // vbrowser needs to fullscreen the control wrapper div
         // Can't really control the VBrowser on mobile anyway, so just fullscreen the video
         container = document.getElementById("leftVideoParent") as HTMLElement;
+      } else if (this.usingHyperbeam()) {
+        container = document.getElementById("leftHyperbeam") as HTMLElement;
       } else {
         // fullscreen just the video
         container = this.Player().getVideoEl();
@@ -1920,6 +1981,9 @@ export class App extends React.Component<AppProps, AppState> {
     }
     if (input.startsWith("vbrowser://")) {
       return "Virtual Browser" + (this.state.isVBrowserLarge ? "+" : "");
+    }
+    if (isHyperbeam(input)) {
+      return "Cloud Browser";
     }
     if (isMagnet(input)) {
       const magnetParsed = new URLSearchParams(input);
@@ -2200,7 +2264,8 @@ export class App extends React.Component<AppProps, AppState> {
                       )}
                       {!this.localStreamToPublish &&
                         !sharer &&
-                        !this.playingVBrowser() && (
+                        !this.playingVBrowser() &&
+                        !this.usingHyperbeam() && (
                           <Button
                             className={styles.shareButton}
                             color="blue"
@@ -2217,7 +2282,8 @@ export class App extends React.Component<AppProps, AppState> {
                         )}
                       {!this.localStreamToPublish &&
                         !sharer &&
-                        !this.playingVBrowser() && (
+                        !this.playingVBrowser() &&
+                        !this.usingHyperbeam() && (
                           <Button
                             className={styles.shareButton}
                             disabled={!this.haveLock()}
@@ -2232,6 +2298,30 @@ export class App extends React.Component<AppProps, AppState> {
                             VBrowser
                           </Button>
                         )}
+                      {!this.localStreamToPublish &&
+                        !sharer &&
+                        !this.playingVBrowser() &&
+                        !this.usingHyperbeam() && (
+                          <Button
+                            className={styles.shareButton}
+                            disabled={!this.haveLock()}
+                            color="teal"
+                            onClick={this.startHyperbeam}
+                            leftSection={<IconBrowser />}
+                          >
+                            Cloud Browser
+                          </Button>
+                        )}
+                      {this.usingHyperbeam() && (
+                        <Button
+                          color="red"
+                          disabled={!this.haveLock()}
+                          onClick={this.stopHyperbeam}
+                          leftSection={<IconX />}
+                        >
+                          Stop Cloud Browser
+                        </Button>
+                      )}
                       {this.playingVBrowser() && (
                         <>
                           <Button
@@ -2499,6 +2589,17 @@ export class App extends React.Component<AppProps, AppState> {
                       allow="autoplay; encrypted-media"
                       src="https://www.youtube.com/embed/?enablejsapi=1&controls=0&rel=0"
                     />
+                    {this.usingHyperbeam() && (
+                      <iframe
+                        id="leftHyperbeam"
+                        title="Cloud Browser"
+                        className={styles.videoContent}
+                        allowFullScreen
+                        frameBorder="0"
+                        allow="autoplay; encrypted-media; clipboard-write"
+                        src={this.state.roomMedia}
+                      />
+                    )}
                     {this.playingVBrowser() &&
                     this.getVBrowserPass() &&
                     this.getVBrowserHost() ? (
