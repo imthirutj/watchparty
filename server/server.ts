@@ -204,9 +204,20 @@ function xmlField(block: string, tag: string): string {
 async function searchScraperSubtitles(title: string) {
   const url = `https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-${encodeURIComponent(title)}/xml`;
   const resp = await axios.get<string>(url, {
-    headers: { "User-Agent": "watchparty v1" },
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    },
   });
   const blocks = resp.data.match(/<subtitle>[\s\S]*?<\/subtitle>/g) ?? [];
+  if (blocks.length === 0) {
+    console.log(
+      "[subtitles] scraper got 0 results for %s, status=%s, snippet=%s",
+      title,
+      resp.status,
+      resp.data.slice(0, 300).replace(/\s+/g, " "),
+    );
+  }
   return blocks
     .map((block) => {
       const fileId = xmlField(block, "IDSubtitleFile");
