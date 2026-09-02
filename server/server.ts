@@ -144,9 +144,70 @@ app.post("/subtitle", async (req, res) => {
   res.json({ hash });
 });
 
+// Free subtitle source, no API key required.
+// Search: title -> IMDb id (IMDb's public suggestion/autocomplete endpoint) -> subtitle list.
+async function searchScraperSubtitles(title: string) {
+  const bucket = title[0]?.toLowerCase() || "a";
+  const suggestResp = await axios.get(
+    `https://v3.sg.media-imdb.com/suggestion/${bucket}/${encodeURIComponent(title)}.json`,
+  );
+  const imdbId = suggestResp.data?.d?.find((r: any) =>
+    r.id?.startsWith("tt"),
+  )?.id;
+  if (!imdbId) {
+    return [];
+  }
+  const subResp = await axios.get(
+    `https://opensubtitle-scrapper.vercel.app/api/subtitles?imdb=${imdbId}`,
+  );
+  const subtitles = subResp.data?.subtitles ?? [];
+  return subtitles.map((sub: any) => ({
+    id: "sc_" + sub.id,
+    type: "subtitle",
+    attributes: {
+      release: `[${(sub.lang || "").toUpperCase()}] ${sub.encoding || ""}`.trim(),
+      language: sub.lang,
+      files: [
+        {
+          file_id: "sc_" + Buffer.from(String(sub.url)).toString("base64url"),
+        },
+      ],
+    },
+  }));
+}
+
 app.get("/downloadSubtitles", async (req, res) => {
-  // Request the URL from OS
+  const fileId = String(req.query.file_id ?? "");
   try {
+    if (fileId.startsWith("sc_")) {
+      // Free scraper source, no OpenSubtitles key needed
+      const directUrl = Buffer.from(fileId.slice(3), "base64url").toString(
+        "utf8",
+      );
+      const subResp = await axios.get(directUrl, {
+        responseType: "arraybuffer",
+      });
+      redisCount("subDownloadsScraper");
+      if (!redis) {
+        res.json({ link: directUrl });
+        return;
+      }
+      const data = subResp.data;
+      const hash = crypto
+        .createHash("sha256")
+        .update(data, "utf8")
+        .digest()
+        .toString("hex");
+      const gzipData = gzipSync(data);
+      await redis.setex("subtitle:" + hash, 24 * 60 * 60, gzipData);
+      res.json({ link: "/subtitle/" + hash });
+      return;
+    }
+    if (!config.OPENSUBTITLES_KEY) {
+      res.status(503).json({ error: "OpenSubtitles not configured" });
+      return;
+    }
+    // Request the URL from OS
     const urlResp = await axios<{ link: string }>({
       url: "https://api.opensubtitles.com/api/v1/download",
       method: "POST",
@@ -183,9 +244,9 @@ app.get("/downloadSubtitles", async (req, res) => {
     res.json({ link: "/subtitle/" + hash });
   } catch (e) {
     if (isAxiosError(e)) {
-      console.log(e.response);
+      console.log(e.response?.status, e.response?.data);
     }
-    throw e;
+    res.status(502).json({ error: "subtitle download failed" });
   }
 });
 
@@ -193,6 +254,13 @@ app.get("/searchSubtitles", async (req, res) => {
   try {
     const title = req.query.title ? String(req.query.title) : "";
     const url = req.query.url ? String(req.query.url) : "";
+    if (!config.OPENSUBTITLES_KEY) {
+      // No official API key configured, use the free scraper fallback.
+      // Hash-based ("by hash") search isn't supported by the scraper.
+      res.json(title ? await searchScraperSubtitles(title) : []);
+      redisCount("subSearchesScraper");
+      return;
+    }
     let subUrl = "";
     if (url) {
       const startResp = await axios({

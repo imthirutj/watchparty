@@ -202,7 +202,9 @@ export class SubtitleModal extends React.Component<{
                         const data = await resp.json();
                         this.props.socket.emit(
                           "CMD:subtitle",
-                          serverPath + data.link,
+                          data.link.startsWith("http")
+                            ? data.link
+                            : serverPath + data.link,
                         );
                       }}
                     >
