@@ -1,5 +1,6 @@
 import { default as toWebVTT } from "srt-webvtt";
 import { Player } from "./Player";
+import { serverPath } from "../../utils/utils";
 
 export class HTML implements Player {
   elId: string;
@@ -135,7 +136,20 @@ export class HTML implements Player {
     if (Boolean(src)) {
       let subtitleSrc = src;
       if (subtitleSrc) {
-        const response = await fetch(subtitleSrc);
+        let response: Response;
+        try {
+          response = await fetch(subtitleSrc);
+          if (!response.ok) {
+            throw new Error("bad status " + response.status);
+          }
+        } catch {
+          // Likely CORS or a network error fetching a third-party subtitle
+          // URL directly; retry through our own server, which isn't
+          // subject to CORS
+          response = await fetch(
+            serverPath + "/proxySubtitle?url=" + encodeURIComponent(src),
+          );
+        }
         const buffer = await response.arrayBuffer();
         const url = await toWebVTT(new Blob([buffer]));
         const track = document.createElement("track");

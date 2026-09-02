@@ -116,6 +116,25 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// Server-side fallback for loading a subtitle URL the browser can't fetch
+// directly due to CORS (many third-party subtitle sites don't send
+// Access-Control-Allow-Origin). Server-to-server requests aren't subject
+// to CORS, so this always works regardless of the source site's headers.
+app.get("/proxySubtitle", async (req, res) => {
+  const url = String(req.query.url ?? "");
+  if (!url.startsWith("http")) {
+    res.status(400).json({ error: "url required" });
+    return;
+  }
+  try {
+    const resp = await axios.get(url, { responseType: "arraybuffer" });
+    res.setHeader("Content-Type", "text/plain");
+    res.send(resp.data);
+  } catch (e) {
+    res.status(502).json({ error: "failed to fetch subtitle" });
+  }
+});
+
 // Hyperbeam managed cloud browser (alternative to self-hosted VBrowser,
 // no Docker/SSH/VM infra needed -- Hyperbeam hosts the browser itself)
 app.post("/hyperbeamSession", async (_req, res) => {
