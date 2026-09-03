@@ -60,6 +60,7 @@ import {
   IconFile,
   IconKeyboardFilled,
   IconList,
+  IconMessageFilled,
   IconScreenShare,
   IconSettings,
   IconUser,
@@ -737,10 +738,9 @@ export class App extends React.Component<AppProps, AppState> {
       this.setState({
         chat: this.state.chat,
         scrollTimestamp: Date.now(),
-        unreadCount:
-          this.state.currentTab === "chat"
-            ? this.state.unreadCount
-            : this.state.unreadCount + 1,
+        unreadCount: data.system
+          ? this.state.unreadCount
+          : this.state.unreadCount + 1,
       });
     });
     socket.on("REC:addReaction", (data: Reaction) => {
@@ -2762,6 +2762,30 @@ export class App extends React.Component<AppProps, AppState> {
                   Settings
                 </Button>
               </div>
+              {isMobile() && this.state.unreadCount > 0 && (
+                <div
+                  style={{ position: "fixed", bottom: 16, right: 16, zIndex: 1000 }}
+                  onClick={() => {
+                    this.setState({ unreadCount: 0 });
+                    this.chatRef.current?.scrollToBottom();
+                    window.scrollTo({
+                      top: document.body.scrollHeight,
+                      behavior: "smooth",
+                    });
+                  }}
+                >
+                  <ActionIcon size={50} radius="xl" color="blue">
+                    <IconMessageFilled size={26} />
+                  </ActionIcon>
+                  <Badge
+                    circle
+                    color="red"
+                    style={{ position: "absolute", top: -4, right: -4 }}
+                  >
+                    {this.state.unreadCount}
+                  </Badge>
+                </div>
+              )}
               {this.state.state === "connected" && (
                 <div
                   style={{
